@@ -1,3 +1,4 @@
+import time
 import requests as rq
 import logging
 from bs4 import BeautifulSoup
@@ -9,31 +10,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 STEAM_URL = "https://store.steampowered.com"
 CATEGORY_PARENT_BLOCK_SELECTOR = "body > div.responsive_page_frame.with_header > div.responsive_page_content > div.responsive_page_template_content > div.home_page_body_ctn > div.home_page_content > div.home_page_gutter > div:nth-child(2)"
 CATEGORY_CHILD_CLASS = "gutter_item"
-
-def getCategoriList(steamURL = STEAM_URL):
-    try:
-        #메인 페이지 요청
-        response = rq.get(STEAM_URL)
-        if response.status_code != 200:
-            return None
-        
-        parser = BeautifulSoup(response.content, "lxml")
-        
-        #카테고리 링크가 속해있는 부모 블록
-        parentDivBlcok = parser.select_one(CATEGORY_PARENT_BLOCK_SELECTOR)
-        
-        #부모 블록 아래의 클래스만 검색함
-        childCategoryList = parentDivBlcok.find_all("a", class_ = CATEGORY_CHILD_CLASS)
-        
-        #(카테고리 이름, 카테고리 링크)와 같읕 튜플형이 포함된 리스트를 만듬
-        categoriList = [(child.text.strip(), child.attrs["href"]) for child in childCategoryList]
-        return categoriList
-        
-        
-    except Exception as e:
-        logging.error(e)
-        return None
-    
 
 class SteamCrawler:
     CATEGORY_ITEM_PAGE_BLOCK_ID = "NewReleases_links"
@@ -87,8 +63,7 @@ class SteamCrawler:
                 self.driver.get(self.targetCategoryURL)
                 
             parentBlock = self.findID(self.CATEGORY_ITEM_PAGE_BLOCK_ID)
-            print(parentBlock)
-            childPageButtons = self.findTag("a", parentBlock)
+            childPageButtons = self.findClass(self.CATEGORY_ITEM_PAGE_BUTTON_CLASS, parentBlock)
             
             if self.driver.current_url != preURL:
                 self.driver.get(preURL)
@@ -97,18 +72,20 @@ class SteamCrawler:
             
         except Exception as e:
             logging.error(e)
-            return None
+            return 0
             
-    def getPageItem(self, targetURL):
+    def getPageItem(self):
         try:
-            self.driver.get(targetURL)
             parent = self.findID(self.ITEM_PARENT_DIV_BLOCK_ID)
             childList = self.findClass(self.ITEM_CHILD_CLASS, parent)
-            [print(child.text) for child in childList]
+            resultList = [child.get_attribute("href") for child in childList]
+            #print(resultList)
+            #time.sleep(10)
+            return resultList
             
         except Exception as e:
             logging.error(e)
-            return None
+            return []
         
         
         
@@ -117,17 +94,53 @@ class SteamCrawler:
             self.driver.get(self.targetCategoryURL)
             pageCount = self.getCategoryPageCount()
             
-            import time
+            itemList = []
             for x in range(pageCount):
-                targetURL = self.targetCategoryURL + self.NEW_RELEASE_URL_FORMAT.format(x)
-                self.getPageItem(targetURL)
+                itemList.extend(self.getPageItem())
+                nextButton = self.findID("NewReleases_btn_next")
+                nextButton.click()
+                time.sleep(1.5)
+
+            return itemList
             
         except Exception as e:
             logging.error(e)
+            return []
+
+def getCategoriList(steamURL = STEAM_URL):
+    try:
+        #메인 페이지 요청
+        response = rq.get(STEAM_URL)
+        if response.status_code != 200:
             return None
+        
+        parser = BeautifulSoup(response.content, "lxml")
+        
+        #카테고리 링크가 속해있는 부모 블록
+        parentDivBlcok = parser.select_one(CATEGORY_PARENT_BLOCK_SELECTOR)
+        
+        #부모 블록 아래의 클래스만 검색함
+        childCategoryList = parentDivBlcok.find_all("a", class_ = CATEGORY_CHILD_CLASS)
+        
+        #(카테고리 이름, 카테고리 링크)와 같읕 튜플형이 포함된 리스트를 만듬
+        categoriList = [(child.text.strip(), child.attrs["href"]) for child in childCategoryList]
+        return categoriList
+        
+        
+    except Exception as e:
+        logging.error(e)
+        return None
     
 if __name__ == "__main__":
-    catList = getCategoriList()
-    driver = SteamCrawler(catList[0][1])
-    ret = driver.getCategoryItems()
-    
+    categoryList = getCategoriList()
+
+    itemDict = {}
+
+    #맨 처음 3개만
+    for name, url in categoryList[:3]:
+        driver = SteamCrawler(url)
+        itemList = driver.getCategoryItems()
+        itemDict[name] = itemList
+
+        print(f"{name} : {len(itemList)}")
+        del driver
